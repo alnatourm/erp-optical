@@ -1,0 +1,682 @@
+import React, { useState } from 'react';
+import { FileText, Download, Filter, Receipt, Truck, Eye, X, Printer, Scissors, Wallet, Users } from 'lucide-react';
+import { Invoice, Supplier, Branch, PurchaseOrder, DailyCashClosing, Customer } from '../types';
+import { useLanguage } from '../lib/i18n';
+
+interface AccountantReportsModuleProps {
+  invoices: Invoice[];
+  suppliers: Supplier[];
+  purchaseOrders?: PurchaseOrder[];
+  cashClosings?: DailyCashClosing[];
+  onUpdatePurchaseOrderStatus?: (poId: string, newStatus: 'Pending' | 'Partially Received' | 'Received' | 'Cancelled') => void;
+  onApproveCashHandover?: (id: string) => void;
+  branches?: Branch[];
+  activeBranch?: Branch;
+  customers?: Customer[];
+}
+
+export const AccountantReportsModule: React.FC<AccountantReportsModuleProps> = ({
+  invoices,
+  suppliers,
+  purchaseOrders = [],
+  cashClosings = [],
+  onUpdatePurchaseOrderStatus,
+  branches,
+  activeBranch,
+  onApproveCashHandover,
+  customers = []
+}) => {
+  const { lang } = useLanguage();
+  const [activeReport, setActiveReport] = useState<'invoices' | 'purchase_orders' | 'discounts' | 'z_reports' | 'clients'>('invoices');
+  const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
+
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterSalesman, setFilterSalesman] = useState('');
+  const [filterBalance, setFilterBalance] = useState('all');
+  const [filterPaymentMethod, setFilterPaymentMethod] = useState('all');
+  const [filterBranch, setFilterBranch] = useState('all');
+
+  const filteredInvoices = invoices.filter(inv => {
+    if (filterDateFrom && new Date(inv.invoiceDate) < new Date(filterDateFrom)) return false;
+    if (filterDateTo && new Date(inv.invoiceDate) > new Date(filterDateTo)) return false;
+    if (filterSalesman && !inv.salesEmployee.toLowerCase().includes(filterSalesman.toLowerCase())) return false;
+    if (filterBalance === 'fully_paid' && inv.remainingBalance > 0) return false;
+    if (filterBalance === 'partially_paid' && (inv.remainingBalance === 0 || inv.paidAmount === 0)) return false;
+    if (filterBalance === 'unpaid' && inv.paidAmount > 0) return false;
+    if (filterPaymentMethod !== 'all' && inv.paymentMethod !== filterPaymentMethod) return false;
+    if (filterBranch !== 'all' && inv.branchId !== filterBranch) return false;
+    return true;
+  });
+
+  const filteredDiscountInvoices = filteredInvoices.filter(inv => inv.discount > 0);
+
+  const filteredPurchaseOrders = purchaseOrders.filter(po => {
+    if (filterDateFrom && new Date(po.orderDate) < new Date(filterDateFrom)) return false;
+    if (filterDateTo && new Date(po.orderDate) > new Date(filterDateTo)) return false;
+    if (filterSalesman && !po.createdBy.toLowerCase().includes(filterSalesman.toLowerCase())) return false;
+    if (filterBranch !== 'all' && po.branchId !== filterBranch) return false;
+    return true;
+  });
+
+  const filteredCashClosings = cashClosings.filter(cc => {
+    if (filterDateFrom && new Date(cc.date) < new Date(filterDateFrom)) return false;
+    if (filterDateTo && new Date(cc.date) > new Date(filterDateTo)) return false;
+    if (filterBranch !== 'all' && cc.branchId !== filterBranch) return false;
+    return true;
+  });
+
+  const handleExportCSV = () => {
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+    
+    if (activeReport === 'invoices') {
+      csvContent += "Invoice #,Date,Customer,Amount (JOD),Paid,Balance,Payment Method\n";
+      filteredInvoices.forEach(inv => {
+        const date = new Date(inv.createdAt).toLocaleDateString();
+        csvContent += `${inv.invoiceNumber},${date},"${inv.customerName}",${inv.grandTotal},${inv.paidAmount},${inv.remainingBalance},${inv.paymentMethod}\n`;
+      });
+    } else if (activeReport === 'discounts') {
+      csvContent += "Invoice #,Date,Customer,Subtotal (JOD),Discount (JOD),Total (JOD)\n";
+      filteredDiscountInvoices.forEach(inv => {
+        const date = new Date(inv.createdAt).toLocaleDateString();
+        csvContent += `${inv.invoiceNumber},${date},"${inv.customerName}",${inv.subtotal},${inv.discount},${inv.grandTotal}\n`;
+      });
+    } else if (activeReport === 'z_reports') {
+      csvContent += "Branch ID,Date,Opening Balance,Cash Sales,Card Sales,Insurance,Expected Cash,Actual Cash,Difference,Notes\n";
+      filteredCashClosings.forEach(cc => {
+        const date = new Date(cc.date).toLocaleDateString();
+        csvContent += `${cc.branchId},${date},${cc.openingBalance},${cc.cashSales},${cc.cardSales},${cc.insuranceSales},${cc.expectedCash},${cc.actualCash},${cc.difference},"${cc.notes || ''}"\n`;
+      });
+    } else if (activeReport === 'purchase_orders') {
+      csvContent += "P.O Number,Date,Supplier,Amount (JOD),Status,Expected Delivery\n";
+      filteredPurchaseOrders.forEach(po => {
+        csvContent += `"${po.poNumber}","${new Date(po.orderDate).toLocaleDateString()}","${po.supplierName}",${po.totalAmount},"${po.status}","${po.expectedDeliveryDate || ''}"\n`;
+      });
+    } else if (activeReport === 'clients') {
+      csvContent += "Client Name,Phone,Secondary Phone,Email,Membership Level,Loyalty Points,Registration Date\n";
+      customers.forEach(c => {
+        const regDate = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '';
+        csvContent += `"${c.name}","${c.phone}","${c.secondaryPhone || ''}","${c.email || ''}","${c.membershipLevel}",${c.loyaltyPoints},"${regDate}"\n`;
+      });
+    } else {
+      csvContent += "P.O Number,Date,Supplier,Amount (JOD),Status,Expected Delivery\n";
+      filteredPurchaseOrders.forEach(po => {
+        csvContent += `"${po.poNumber}","${new Date(po.orderDate).toLocaleDateString()}","${po.supplierName}",${po.totalAmount},"${po.status}","${po.expectedDeliveryDate || ''}"\n`;
+      });
+    }
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `${activeReport}_report.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-900">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <FileText className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">
+                {lang === 'ar' ? 'التقارير المحاسبية' : 'Accountant Reports'}
+              </h2>
+              <p className="text-xs text-slate-500 font-medium">
+                {lang === 'ar'
+                  ? 'تقارير المبيعات، الفواتير، وأوامر الشراء'
+                  : 'Sales, Invoices, and Purchase Orders Reports'}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExportCSV}
+            className="px-4 py-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-bold rounded-lg transition cursor-pointer flex items-center gap-2 text-sm border border-emerald-200"
+          >
+            <Download className="w-4 h-4" />
+            {lang === 'ar' ? 'تصدير إلى إكسل' : 'Export to Excel'}
+          </button>
+          
+          <div className="flex bg-slate-100 p-1 rounded-lg">
+            <button
+              onClick={() => setActiveReport('invoices')}
+              className={`px-4 py-2 text-sm font-bold rounded-md transition cursor-pointer flex items-center gap-2 ${
+                activeReport === 'invoices' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Receipt className="w-4 h-4" />
+              {lang === 'ar' ? 'تقرير الفواتير' : 'Invoices Report'}
+            </button>
+            <button
+              onClick={() => setActiveReport('discounts')}
+              className={`px-4 py-2 text-sm font-bold rounded-md transition cursor-pointer flex items-center gap-2 ${
+                activeReport === 'discounts' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Scissors className="w-4 h-4" />
+              {lang === 'ar' ? 'تقرير الخصومات' : 'Discounts Report'}
+            </button>
+            <button
+              onClick={() => setActiveReport('z_reports')}
+              className={`px-4 py-2 text-sm font-bold rounded-md transition cursor-pointer flex items-center gap-2 ${
+                activeReport === 'z_reports' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              {lang === 'ar' ? 'تقرير إغلاق الكاش (Z Report)' : 'Z Report (Cash Closings)'}
+            </button>
+            <button
+              onClick={() => setActiveReport('purchase_orders')}
+              className={`px-4 py-2 text-sm font-bold rounded-md transition cursor-pointer flex items-center gap-2 ${
+                activeReport === 'purchase_orders' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              {lang === 'ar' ? 'تقرير أوامر الشراء (P.O)' : 'P.O Report'}
+            </button>
+            <button
+              onClick={() => setActiveReport('clients')}
+              className={`px-4 py-2 text-sm font-bold rounded-md transition cursor-pointer flex items-center gap-2 ${
+                activeReport === 'clients' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              {lang === 'ar' ? 'تقرير العملاء' : 'Clients Report'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters Section */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-4 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">{lang === 'ar' ? 'من تاريخ' : 'Date From'}</label>
+          <input 
+            type="date" 
+            value={filterDateFrom}
+            onChange={(e) => setFilterDateFrom(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">{lang === 'ar' ? 'إلى تاريخ' : 'Date To'}</label>
+          <input 
+            type="date" 
+            value={filterDateTo}
+            onChange={(e) => setFilterDateTo(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">{lang === 'ar' ? 'الموظف (البائع)' : 'Salesman'}</label>
+          <input 
+            type="text" 
+            placeholder={lang === 'ar' ? 'اسم الموظف...' : 'Salesman name...'}
+            value={filterSalesman}
+            onChange={(e) => setFilterSalesman(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1">{lang === 'ar' ? 'الفرع' : 'Branch'}</label>
+          <select 
+            value={filterBranch}
+            onChange={(e) => setFilterBranch(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option value="all">{lang === 'ar' ? 'جميع الفروع' : 'All Branches'}</option>
+            {branches?.map(b => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+        </div>
+        {activeReport === 'invoices' && (
+          <>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">{lang === 'ar' ? 'الرصيد' : 'Balance'}</label>
+              <select 
+                value={filterBalance}
+                onChange={(e) => setFilterBalance(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="all">{lang === 'ar' ? 'الكل' : 'All'}</option>
+                <option value="fully_paid">{lang === 'ar' ? 'مدفوع بالكامل' : 'Fully Paid'}</option>
+                <option value="partially_paid">{lang === 'ar' ? 'دفع جزئي' : 'Partially Paid'}</option>
+                <option value="unpaid">{lang === 'ar' ? 'غير مدفوع' : 'Unpaid'}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">{lang === 'ar' ? 'طريقة الدفع' : 'Payment Method'}</label>
+              <select 
+                value={filterPaymentMethod}
+                onChange={(e) => setFilterPaymentMethod(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              >
+                <option value="all">{lang === 'ar' ? 'الكل' : 'All'}</option>
+                <option value="Cash">{lang === 'ar' ? 'نقدي' : 'Cash'}</option>
+                <option value="Visa">{lang === 'ar' ? 'فيزا' : 'Visa'}</option>
+                <option value="Cliq">{lang === 'ar' ? 'كليك' : 'Cliq'}</option>
+                <option value="Credit Card">{lang === 'ar' ? 'بطاقة ائتمان' : 'Credit Card'}</option>
+                <option value="Bank Transfer">{lang === 'ar' ? 'حوالة بنكية' : 'Bank Transfer'}</option>
+                <option value="Insurance">{lang === 'ar' ? 'تأمين' : 'Insurance'}</option>
+              </select>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        {activeReport === 'invoices' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left rtl:text-right text-sm">
+               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'رقم الفاتورة' : 'Invoice #'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الفرع' : 'Branch'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'العميل' : 'Customer'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'القيمة' : 'Amount (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'المدفوع' : 'Paid'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الرصيد المتبقي' : 'Balance'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'طريقة الدفع' : 'Payment Method'}</th>
+                  <th className="p-4 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredInvoices.map(inv => (
+                  <tr key={inv.id} className="hover:bg-slate-50">
+                    <td className="p-4 font-bold text-slate-900">{inv.invoiceNumber}</td>
+                    <td className="p-4 text-slate-600">{new Date(inv.createdAt).toLocaleDateString()}</td>
+                    <td className="p-4 font-medium text-slate-700">
+                      {branches?.find(b => b.id === inv.branchId)?.name || 'Main Branch'}
+                    </td>
+                    <td className="p-4 font-bold text-slate-900">{inv.customerName}</td>
+                    <td className="p-4 font-mono font-bold">{(inv.grandTotal || 0).toFixed(2)}</td>
+                    <td className="p-4 font-mono text-emerald-600">{(inv.paidAmount || 0).toFixed(2)}</td>
+                    <td className="p-4 font-mono text-rose-600">{(inv.remainingBalance || 0).toFixed(2)}</td>
+                    <td className="p-4">
+                      <span className="px-2 py-1 bg-slate-100 text-slate-700 text-xs rounded-md font-medium">
+                        {inv.paymentMethod}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <button 
+                        onClick={() => setViewingInvoice(inv)}
+                        className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                        title={lang === 'ar' ? 'عرض الفاتورة' : 'View Invoice'}
+                      >
+                        <Eye className="w-5 h-5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {filteredInvoices.length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center text-slate-500">
+                      {lang === 'ar' ? 'لا يوجد فواتير' : 'No invoices found.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeReport === 'discounts' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left rtl:text-right text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'رقم الفاتورة' : 'Invoice #'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'العميل' : 'Customer'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'المجموع الفرعي' : 'Subtotal (JOD)'}</th>
+                  <th className="p-4 font-medium text-red-600">{lang === 'ar' ? 'الخصم' : 'Discount (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'المجموع النهائي' : 'Total (JOD)'}</th>
+                  <th className="p-4 font-medium w-16"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredDiscountInvoices.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-slate-500">
+                      {lang === 'ar' ? 'لا يوجد فواتير بخصم' : 'No discounted invoices found'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDiscountInvoices.map(inv => (
+                    <tr key={inv.id} className="hover:bg-slate-50 transition">
+                      <td className="p-4 font-bold text-blue-600">{inv.invoiceNumber}</td>
+                      <td className="p-4 font-medium text-slate-700">{new Date(inv.createdAt).toLocaleDateString()}</td>
+                      <td className="p-4 font-medium text-slate-900">{inv.customerName}</td>
+                      <td className="p-4 font-bold text-slate-900">{(inv.subtotal || 0).toFixed(2)}</td>
+                      <td className="p-4 font-bold text-red-600">-{(inv.discount || 0).toFixed(2)}</td>
+                      <td className="p-4 font-bold text-emerald-600">{(inv.grandTotal || 0).toFixed(2)}</td>
+                      <td className="p-4">
+                        <button 
+                          onClick={() => setViewingInvoice(inv)}
+                          className="p-2 text-slate-400 hover:bg-white hover:text-blue-600 rounded-lg shadow-sm border border-transparent hover:border-slate-200 transition"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeReport === 'z_reports' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left rtl:text-right text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الفرع' : 'Branch'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الرصيد الافتتاحي' : 'Opening (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'مبيعات الكاش' : 'Cash Sales (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'مبيعات البطاقات' : 'Card Sales (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'التأمين' : 'Insurance (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الرصيد المتوقع' : 'Expected (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الرصيد الفعلي' : 'Actual (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الفرق' : 'Diff (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الحالة والإجراء' : 'Status & Action'}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredCashClosings.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-slate-500">
+                      {lang === 'ar' ? 'لا يوجد سجلات إغلاق' : 'No cash closings found'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCashClosings.map(cc => {
+                    const branchName = branches?.find(b => b.id === cc.branchId)?.name || cc.branchId;
+                    return (
+                      <tr key={cc.id} className="hover:bg-slate-50 transition">
+                        <td className="p-4 font-bold text-slate-700">{branchName}</td>
+                        <td className="p-4 font-medium text-slate-700">{new Date(cc.date).toLocaleDateString()}</td>
+                        <td className="p-4 text-slate-600">{(cc.openingBalance || 0).toFixed(2)}</td>
+                        <td className="p-4 text-emerald-600">{(cc.cashSales || 0).toFixed(2)}</td>
+                        <td className="p-4 text-blue-600">{(cc.cardSales || 0).toFixed(2)}</td>
+                        <td className="p-4 text-purple-600">{cc.insuranceSales?.toFixed(2) || '0.00'}</td>
+                        <td className="p-4 font-bold text-slate-700">{(cc.expectedCash || 0).toFixed(2)}</td>
+                        <td className="p-4 font-bold text-slate-900">{(cc.actualCash || 0).toFixed(2)}</td>
+                        <td className={`p-4 font-bold ${cc.difference < 0 ? 'text-red-600' : cc.difference > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                          {cc.difference > 0 ? '+' : ''}{(cc.difference || 0).toFixed(2)}
+                        </td>
+                        <td className="p-4">
+                          {cc.status === 'HandedOver' ? (
+                            <button
+                              onClick={() => onApproveCashHandover && onApproveCashHandover(cc.id)}
+                              className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-xs font-bold px-3 py-1.5 rounded-lg transition"
+                            >
+                              {lang === 'ar' ? 'تأكيد الاستلام' : 'Confirm Receipt'}
+                            </button>
+                          ) : cc.status === 'Approved' ? (
+                            <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100">
+                              {lang === 'ar' ? '✅ تم الاستلام' : '✅ Received'}
+                            </span>
+                          ) : (
+                            <span className="text-xs font-medium text-slate-500">
+                              {cc.status}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeReport === 'purchase_orders' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left rtl:text-right text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'رقم P.O' : 'P.O #'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'المورد' : 'Supplier'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'القيمة' : 'Amount (JOD)'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الحالة' : 'Status'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'تاريخ التسليم المتوقع' : 'Expected Delivery'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'الإجراءات' : 'Actions'}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredPurchaseOrders.map(po => (
+                  <tr key={po.id} className="hover:bg-slate-50">
+                    <td className="p-4 font-bold text-slate-900">{po.poNumber}</td>
+                    <td className="p-4 text-slate-600">{new Date(po.orderDate).toLocaleDateString()}</td>
+                    <td className="p-4 font-bold text-slate-900">{po.supplierName}</td>
+                    <td className="p-4 font-mono font-bold text-emerald-700">{po.totalAmount.toLocaleString()}</td>
+                    <td className="p-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                        po.status === 'Received' ? 'bg-emerald-100 text-emerald-700' :
+                        po.status === 'Pending' ? 'bg-amber-100 text-amber-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {po.status === 'Pending' && lang === 'ar' ? 'قيد الانتظار' : po.status === 'Received' && lang === 'ar' ? 'مكتمل/مستلم' : po.status}
+                      </span>
+                    </td>
+                    <td className="p-4 text-slate-600">{po.expectedDeliveryDate || '-'}</td>
+                    <td className="p-4">
+                      {po.status === 'Pending' && onUpdatePurchaseOrderStatus && (
+                        <button
+                          onClick={() => onUpdatePurchaseOrderStatus(po.id, 'Received')}
+                          className="bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-xs px-3 py-1.5 rounded-lg transition cursor-pointer"
+                        >
+                          {lang === 'ar' ? 'تأكيد الاستلام' : 'Mark Received'}
+                        </button>
+                      )}
+                      {po.status === 'Received' && onUpdatePurchaseOrderStatus && (
+                        <button
+                          onClick={() => onUpdatePurchaseOrderStatus(po.id, 'Pending')}
+                          className="bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 font-bold text-xs px-3 py-1.5 rounded-lg transition cursor-pointer"
+                        >
+                          {lang === 'ar' ? 'إلغاء الاستلام' : 'Undo'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {filteredPurchaseOrders.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-slate-500">
+                      {lang === 'ar' ? 'لا يوجد تقارير لأوامر الشراء' : 'No purchase orders found.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeReport === 'clients' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left rtl:text-right text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'اسم العميل' : 'Client Name'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'رقم الهاتف' : 'Phone'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'رقم هاتف إضافي' : 'Secondary Phone'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'البريد الإلكتروني' : 'Email'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'مستوى العضوية' : 'Membership'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'نقاط الولاء' : 'Loyalty Points'}</th>
+                  <th className="p-4 font-medium">{lang === 'ar' ? 'تاريخ التسجيل' : 'Registration Date'}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {customers.map(c => (
+                  <tr key={c.id} className="hover:bg-slate-50">
+                    <td className="p-4 font-bold text-slate-900">{c.name}</td>
+                    <td className="p-4 font-mono text-slate-700">{c.phone}</td>
+                    <td className="p-4 font-mono text-slate-500">{c.secondaryPhone || '-'}</td>
+                    <td className="p-4 text-slate-600">{c.email || '-'}</td>
+                    <td className="p-4">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                        c.membershipLevel === 'VIP' ? 'bg-purple-100 text-purple-700' :
+                        c.membershipLevel === 'Gold' ? 'bg-amber-100 text-amber-700' :
+                        c.membershipLevel === 'Silver' ? 'bg-slate-200 text-slate-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {c.membershipLevel}
+                      </span>
+                    </td>
+                    <td className="p-4 font-mono font-bold text-emerald-600">{c.loyaltyPoints || 0}</td>
+                    <td className="p-4 text-slate-500">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '-'}</td>
+                  </tr>
+                ))}
+                {customers.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="p-8 text-center text-slate-500">
+                      {lang === 'ar' ? 'لا يوجد عملاء مسجلين' : 'No clients registered.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {viewingInvoice && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white text-slate-900 rounded-2xl max-w-2xl w-full p-8 space-y-6 shadow-xl border border-slate-200 font-sans max-h-[90vh] overflow-y-auto">
+            {/* Receipt Header */}
+            <div className="text-center border-b border-slate-200 pb-4 space-y-1">
+              <h3 className="text-xl font-extrabold tracking-tight uppercase text-slate-900">OptiVision Optical Store</h3>
+              <p className="text-xs text-slate-600 font-medium">
+                {branches?.find(b => b.id === viewingInvoice.branchId)?.name || activeBranch?.name} • 
+                {branches?.find(b => b.id === viewingInvoice.branchId)?.address || activeBranch?.address}
+              </p>
+              <p className="text-xs text-slate-600 font-mono">
+                Tel: {branches?.find(b => b.id === viewingInvoice.branchId)?.phone || activeBranch?.phone}
+              </p>
+              <div className="pt-2 flex items-center justify-between text-xs font-mono font-bold text-slate-900">
+                <span>INVOICE: #{viewingInvoice.invoiceNumber}</span>
+                <span>DATE: {viewingInvoice.invoiceDate}</span>
+              </div>
+            </div>
+
+            {/* Customer & Prescription */}
+            <div className="grid grid-cols-2 gap-4 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
+              <div>
+                <span className="font-bold block text-slate-500 uppercase text-[10px]">Customer:</span>
+                <span className="font-bold text-slate-900 text-sm">{viewingInvoice.customerName}</span>
+                <span className="block text-slate-600 font-mono">{viewingInvoice.customerPhone}</span>
+              </div>
+              <div>
+                <span className="font-bold block text-slate-500 uppercase text-[10px]">Sales Staff:</span>
+                <span className="font-semibold text-slate-800">{viewingInvoice.salesEmployee}</span>
+                <span className="block text-slate-500 font-medium">Delivery: {viewingInvoice.deliveryDate}</span>
+              </div>
+            </div>
+
+            {/* Prescription Matrix */}
+            <div className="border border-slate-200 rounded-xl p-3 text-xs space-y-2 bg-slate-50">
+              <div className="font-bold text-[10px] uppercase text-slate-500">Optical Prescription Record</div>
+              <div className="grid grid-cols-2 gap-2 text-center font-mono text-[11px]">
+                <div className="bg-white p-2 rounded border border-slate-200">
+                  <span className="font-bold block text-slate-800 font-sans">RIGHT EYE (OD)</span>
+                  SPH {viewingInvoice.prescription.rightEye.sph} / CYL {viewingInvoice.prescription.rightEye.cyl} / AXIS {viewingInvoice.prescription.rightEye.axis}°
+                </div>
+                <div className="bg-white p-2 rounded border border-slate-200">
+                  <span className="font-bold block text-slate-800 font-sans">LEFT EYE (OS)</span>
+                  SPH {viewingInvoice.prescription.leftEye.sph} / CYL {viewingInvoice.prescription.leftEye.cyl} / AXIS {viewingInvoice.prescription.leftEye.axis}°
+                </div>
+              </div>
+            </div>
+
+            {/* Products Table */}
+            <table className="w-full text-left text-xs text-slate-800">
+              <thead className="bg-slate-100 uppercase font-bold text-[10px] text-slate-700 border-b border-slate-200">
+                <tr>
+                  <th className="p-2">Barcode</th>
+                  <th className="p-2">Description</th>
+                  <th className="p-2 text-right">Qty</th>
+                  <th className="p-2 text-right">Price</th>
+                  <th className="p-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-[11px] font-mono">
+                {viewingInvoice.items.map((it, i) => (
+                  <tr key={i}>
+                    <td className="p-2 font-bold text-blue-700">{it.barcode}</td>
+                    <td className="p-2 font-sans font-medium">{it.description}</td>
+                    <td className="p-2 text-right">{it.quantity}</td>
+                    <td className="p-2 text-right">{it.price} JOD</td>
+                    <td className="p-2 text-right font-bold text-slate-900">{it.total} JOD</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Totals Summary */}
+            <div className="border-t border-slate-200 pt-3 space-y-1 font-mono text-xs text-slate-700">
+              <div className="flex justify-between font-medium">
+                <span>Subtotal:</span>
+                <span>{(viewingInvoice.subtotal || 0).toFixed(2)} JOD</span>
+              </div>
+              <div className="flex justify-between text-slate-500">
+                <span>Tax (16%):</span>
+                <span>{(viewingInvoice.tax || 0).toFixed(2)} JOD</span>
+              </div>
+              <div className="flex justify-between text-sm font-extrabold text-slate-900 pt-1 border-t border-slate-200">
+                <span>GRAND TOTAL:</span>
+                <span>{(viewingInvoice.grandTotal || 0).toFixed(2)} JOD</span>
+              </div>
+              <div className="flex justify-between font-bold text-emerald-700">
+                <span>Total Amount Paid ({viewingInvoice.paymentMethod}):</span>
+                <span>{(viewingInvoice.paidAmount || 0).toFixed(2)} JOD</span>
+              </div>
+              <div className="flex justify-between font-bold text-slate-900">
+                <span>Remaining Balance Due:</span>
+                <span>{(viewingInvoice.remainingBalance || 0).toFixed(2)} JOD</span>
+              </div>
+              <div className="flex justify-between text-[11px] font-semibold text-slate-500 pt-1">
+                <span>Order Delivery Status:</span>
+                <span className="font-bold text-blue-700">{viewingInvoice.deliveryStatus}</span>
+              </div>
+            </div>
+
+            <div className="text-[10px] text-center text-slate-500 pt-2 border-t border-slate-200 font-medium">
+              Warranty: {viewingInvoice.warrantyTerms} • Thank you for choosing OptiVision!
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  window.print();
+                }}
+                className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center gap-2 shadow-xs"
+              >
+                <Printer className="w-4 h-4" />
+                Print Physical Thermal Invoice
+              </button>
+              <button
+                onClick={() => setViewingInvoice(null)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-6 py-3 rounded-xl border border-slate-200 transition cursor-pointer"
+              >
+                Close Window
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+

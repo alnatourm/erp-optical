@@ -1,0 +1,6 @@
+{
+  "name": "OptiVision Enterprise ERP",
+  "description": "Multi-branch Optical ERP with Excel stock import, prescription POS invoices, customer 360 profile, lab job tracking, and automated call center workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

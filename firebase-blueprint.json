@@ -1,0 +1,57 @@
+{
+  "entities": [
+    {
+      "name": "users",
+      "type": "collection",
+      "description": "Staff user accounts and access roles"
+    },
+    {
+      "name": "branches",
+      "type": "collection",
+      "description": "Optical store branch locations"
+    },
+    {
+      "name": "products",
+      "type": "collection",
+      "description": "Optical inventory items and frames"
+    },
+    {
+      "name": "customers",
+      "type": "collection",
+      "description": "Customer profiles and history"
+    },
+    {
+      "name": "invoices",
+      "type": "collection",
+      "description": "Sales invoices and prescriptions"
+    },
+    {
+      "name": "callReminders",
+      "type": "collection",
+      "description": "Call center reminders"
+    },
+    {
+      "name": "labJobs",
+      "type": "collection",
+      "description": "Laboratory job orders"
+    },
+    {
+      "name": "cashClosings",
+      "type": "collection",
+      "description": "Daily cash register closings"
+    },
+    {
+      "name": "suppliers",
+      "type": "collection",
+      "description": "Suppliers and vendors"
+    },
+    {
+      "name": "importLogs",
+      "type": "collection",
+      "description": "Inventory import history"
+    }
+  ],
+  "security": {
+    "userSpecific": false
+  }
+}
